@@ -1,0 +1,10 @@
+{
+  "name": "pw-ws-server",
+  "version": "0.1.0",
+  "description": "WebSocket transport extension for pw-monitor state",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "ws": "^8.0.0"
+  }
+}

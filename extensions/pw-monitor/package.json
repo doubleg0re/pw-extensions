@@ -1,0 +1,7 @@
+{
+  "name": "pw-monitor",
+  "version": "0.1.0",
+  "description": "Runtime tab monitor for pw-skill — syncs live browser targets with stable tab registry",
+  "type": "module",
+  "private": true
+}

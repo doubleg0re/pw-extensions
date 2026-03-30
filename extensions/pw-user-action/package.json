@@ -1,0 +1,7 @@
+{
+  "name": "pw-user-action",
+  "version": "0.2.0",
+  "description": "User-action overlay — navigation-resilient, persistent state, native renderer ready",
+  "type": "module",
+  "private": true
+}

@@ -1,0 +1,18 @@
+{
+  "name": "pw-monitor",
+  "version": "0.2.0",
+  "description": "Runtime tab monitor — CDP sidecar for real-time tab tracking",
+  "type": "extension",
+  "hooks": {
+    "launch": {
+      "entry": "src/launch-hook.ts"
+    },
+    "load": {
+      "entry": "src/load-hook.ts"
+    },
+    "close": {
+      "entry": "src/close-hook.ts"
+    }
+  },
+  "events": {}
+}

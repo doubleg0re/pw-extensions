@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pw-monitor dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: #0f0f23;
+    color: #e0e0e0;
+    padding: 24px;
+    min-height: 100vh;
+  }
+  h1 { color: #8be9fd; font-size: 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+  h2 { color: #bd93f9; font-size: 14px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .status-dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  }
+  .status-dot.alive { background: #50fa7b; box-shadow: 0 0 6px #50fa7b; }
+  .status-dot.dead { background: #ff5555; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  .card {
+    background: #1a1a2e;
+    border-radius: 8px;
+    padding: 16px;
+    border: 1px solid #2a2a4a;
+  }
+  .card.full { grid-column: 1 / -1; }
+  .meta { color: #888; font-size: 12px; margin-top: 4px; }
+  .meta span { color: #aaa; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: #888; font-weight: 500; padding: 6px 8px; border-bottom: 1px solid #2a2a4a; }
+  td { padding: 6px 8px; border-bottom: 1px solid #1a1a2e; }
+  tr.active td { background: rgba(80, 250, 123, 0.08); }
+  .tab-id { color: #8be9fd; font-weight: 600; }
+  .url { color: #f1fa8c; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .title { color: #ccc; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge.active { background: #50fa7b22; color: #50fa7b; }
+  .badge.pending { background: #ffb86c22; color: #ffb86c; }
+  .badge.sidecar { background: #8be9fd22; color: #8be9fd; }
+  .empty { color: #555; font-style: italic; padding: 12px 0; }
+  .pending-action {
+    background: #2a1a3e;
+    border: 1px solid #4a2a6a;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+  }
+  .pending-action .prompt { color: #ffb86c; margin-bottom: 4px; }
+  .pending-action .actions { display: flex; gap: 6px; }
+  .pending-action .actions span {
+    background: #4f46e5;
+    color: #fff;
+    padding: 2px 10px;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .footer { color: #444; font-size: 11px; margin-top: 24px; text-align: center; }
+  .poll-indicator { color: #555; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<h1>
+  <span class="status-dot" id="sidecar-dot"></span>
+  pw-monitor
+  <span class="poll-indicator" id="poll-status">connecting...</span>
+</h1>
+
+<div class="grid">
+  <div class="card">
+    <h2>Session</h2>
+    <div id="session-info"><span class="empty">loading...</span></div>
+  </div>
+  <div class="card">
+    <h2>Sidecar</h2>
+    <div id="sidecar-info"><span class="empty">loading...</span></div>
+  </div>
+</div>
+
+<div class="card full" style="margin-bottom: 24px;">
+  <h2>Tabs</h2>
+  <div id="tabs-list"><span class="empty">loading...</span></div>
+</div>
+
+<div class="card full">
+  <h2>Pending User Actions</h2>
+  <div id="pending-list"><span class="empty">none</span></div>
+</div>
+
+<div class="footer">pw-monitor dashboard &mdash; SSE via fs.watch (polling fallback)</div>
+
+<script>
+const API = '/api/state';
+let pollCount = 0;
+
+async function poll() {
+  try {
+    const res = await fetch(API);
+    const state = await res.json();
+    render(state);
+    pollCount++;
+    document.getElementById('poll-status').textContent = `poll #${pollCount}`;
+  } catch (err) {
+    document.getElementById('poll-status').textContent = 'error';
+  }
+}
+
+function render(state) {
+  // Session
+  const s = state.session;
+  document.getElementById('session-info').innerHTML = s
+    ? `<div><strong>${s.name}</strong></div>
+       <div class="meta">ID: <span>${s.id}</span> | PID: <span>${s.pid}</span></div>
+       <div class="meta">Started: <span>${new Date(s.startedAt).toLocaleString()}</span></div>`
+    : '<span class="empty">no session</span>';
+
+  // Sidecar
+  const dot = document.getElementById('sidecar-dot');
+  dot.className = 'status-dot ' + (state.sidecarAlive ? 'alive' : 'dead');
+  document.getElementById('sidecar-info').innerHTML = state.sidecarPid
+    ? `<div><span class="badge sidecar">PID ${state.sidecarPid}</span> ${state.sidecarAlive ? 'running' : 'dead'}</div>`
+    : '<span class="empty">not started</span>';
+
+  // Tabs
+  const tabs = state.tabs || [];
+  if (tabs.length === 0) {
+    document.getElementById('tabs-list').innerHTML = '<span class="empty">no tabs</span>';
+  } else {
+    let html = '<table><tr><th>ID</th><th>URL</th><th>Title</th><th></th></tr>';
+    for (const tab of tabs) {
+      const isActive = tab.tabId === state.activeTabId;
+      html += `<tr class="${isActive ? 'active' : ''}">
+        <td class="tab-id">${tab.tabId}</td>
+        <td class="url" title="${esc(tab.url)}">${esc(tab.url)}</td>
+        <td class="title">${esc(tab.title || '')}</td>
+        <td>${isActive ? '<span class="badge active">active</span>' : ''}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    document.getElementById('tabs-list').innerHTML = html;
+  }
+
+  // Pending actions (with clickable buttons when WS connected)
+  const pending = state.pendingActions || [];
+  if (pending.length === 0) {
+    document.getElementById('pending-list').innerHTML = '<span class="empty">none</span>';
+  } else {
+    let html = '';
+    for (const p of pending) {
+      const buttons = (p.actions || []).map(a =>
+        `<button class="action-btn" data-tab="${p.tabId}" data-action="${esc(a)}"
+          style="background:#4f46e5;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:12px;margin-right:6px;"
+          ${wsConn ? '' : 'disabled title="Connect WS server to enable"'}>${esc(a)}</button>`
+      ).join('');
+      html += `<div class="pending-action">
+        <div><span class="badge pending">tab ${p.tabId}</span></div>
+        <div class="prompt">${esc(p.prompt)}</div>
+        <div class="actions">${buttons}</div>
+      </div>`;
+    }
+    document.getElementById('pending-list').innerHTML = html;
+
+    // Bind click handlers
+    document.querySelectorAll('.action-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!wsConn) return;
+        const tabId = parseInt(btn.getAttribute('data-tab') || '0', 10);
+        const action = btn.getAttribute('data-action') || 'continue';
+        wsConn.send(JSON.stringify({
+          type: 'action',
+          action: 'user-action:click',
+          tabId,
+          data: { action },
+        }));
+        btn.textContent = 'sent...';
+        btn.setAttribute('disabled', 'true');
+      });
+    });
+  }
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// --- Connection: try WS first, then SSE, then polling ---
+let wsConn = null;
+let eventCount = 0;
+const WS_PORT = 47831;
+
+function connectWS() {
+  try {
+    const ws = new WebSocket(`ws://127.0.0.1:${WS_PORT}`);
+    ws.onopen = () => {
+      wsConn = ws;
+      document.getElementById('poll-status').textContent = 'WS connected';
+    };
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'snapshot' || msg.type === 'event') {
+          eventCount++;
+          document.getElementById('poll-status').textContent = `WS live #${eventCount}`;
+          render(msg.data);
+        } else if (msg.type === 'action-result') {
+          document.getElementById('poll-status').textContent = `action: ${msg.result}`;
+        } else if (msg.type === 'error') {
+          document.getElementById('poll-status').textContent = `WS error: ${msg.error}`;
+        }
+      } catch {}
+    };
+    ws.onclose = () => {
+      wsConn = null;
+      document.getElementById('poll-status').textContent = 'WS disconnected, using SSE';
+      connectSSE();
+    };
+    ws.onerror = () => {
+      // WS not available, fall back to SSE
+      connectSSE();
+    };
+  } catch {
+    connectSSE();
+  }
+}
+
+function connectSSE() {
+  const es = new EventSource('/api/events');
+  es.onmessage = (event) => {
+    try {
+      const state = JSON.parse(event.data);
+      eventCount++;
+      document.getElementById('poll-status').textContent = `SSE #${eventCount}`;
+      render(state);
+    } catch {}
+  };
+  es.onerror = () => {
+    es.close();
+    document.getElementById('poll-status').textContent = 'polling...';
+    setInterval(poll, 1000);
+  };
+}
+
+// Initial fetch, then try WS → SSE → polling
+poll().then(() => connectWS());
+</script>
+
+</body>
+</html>
