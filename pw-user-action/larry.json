@@ -1,31 +1,31 @@
 {
   "name": "pw-user-action",
   "version": "0.2.0",
-  "description": "User-action overlay — navigation-resilient, persistent state, extension-owned",
+  "description": "User-action overlay — navigation-resilient, persistent state, native renderer ready",
   "type": "extension",
   "actions": {
     "pw-user-action": {
-      "entry": "src/action-user-action.ts",
+      "entry": "dist/action-user-action.js",
       "description": "Show overlay with action buttons, survive navigation, return clicked action"
     }
   },
   "hooks": {
     "load": {
-      "entry": "src/load-hook.ts"
+      "entry": "dist/load-hook.js"
     }
   },
   "events": {
     "tab:navigated": {
-      "entry": "src/on-navigated.ts"
+      "entry": "dist/on-navigated.js"
     },
     "tab:closed": {
-      "entry": "src/on-closed.ts"
+      "entry": "dist/on-closed.js"
     },
     "user-action:started": {
-      "entry": "src/on-started.ts"
+      "entry": "dist/on-started.js"
     },
     "user-action:completed": {
-      "entry": "src/on-completed.ts"
+      "entry": "dist/on-completed.js"
     }
   }
 }

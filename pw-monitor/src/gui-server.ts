@@ -24,7 +24,7 @@ const sessionDir = join(homedir(), '.playwright-state', 'sessions', sessionName)
 const registryPath = join(sessionDir, 'monitor-tabs.json');
 const sessionJsonPath = join(sessionDir, 'session.json');
 const pendingActionsPath = join(sessionDir, 'pending-actions.json');
-const dashboardPath = join(import.meta.dirname || __dirname, 'dashboard.html');
+const dashboardPath = join(import.meta.dirname || __dirname, '..', 'assets', 'dashboard.html');
 
 function readJsonSafe(path: string): any {
   if (!existsSync(path)) return null;

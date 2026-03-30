@@ -40,8 +40,11 @@ export default async (ctx: any) => {
     return;
   }
 
-  // Spawn detached sidecar
-  const sidecarScript = join(import.meta.dirname || __dirname, 'monitor-sidecar.ts');
+  // Spawn detached sidecar — resolve .js (built) or .ts (source/tsx)
+  const scriptDir = import.meta.dirname || __dirname;
+  const sidecarScript = existsSync(join(scriptDir, 'monitor-sidecar.js'))
+    ? join(scriptDir, 'monitor-sidecar.js')
+    : join(scriptDir, 'monitor-sidecar.ts');
   const child = spawn(
     process.execPath,
     [...process.execArgv, sidecarScript, cdpEndpoint, sessionName, registryPath],

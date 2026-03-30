@@ -1,18 +1,21 @@
 {
   "name": "pw-monitor",
   "version": "0.2.0",
-  "description": "Runtime tab monitor — CDP sidecar for real-time tab tracking",
+  "description": "Real-time tab monitor — CDP WebSocket sidecar, tab:* events, GUI dashboard",
   "type": "extension",
   "hooks": {
     "launch": {
-      "entry": "src/launch-hook.ts"
+      "entry": "dist/launch-hook.js"
     },
     "load": {
-      "entry": "src/load-hook.ts"
+      "entry": "dist/load-hook.js"
     },
     "close": {
-      "entry": "src/close-hook.ts"
+      "entry": "dist/close-hook.js"
     }
   },
-  "events": {}
+  "events": {},
+  "rolling": {
+    "entry": "dist/rolling.js"
+  }
 }

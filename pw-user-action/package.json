@@ -3,5 +3,12 @@
   "version": "0.2.0",
   "description": "User-action overlay — navigation-resilient, persistent state, native renderer ready",
   "type": "module",
-  "private": true
+  "private": true,
+  "scripts": {
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^22.0.0"
+  }
 }

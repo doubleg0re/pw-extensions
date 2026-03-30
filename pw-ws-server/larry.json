@@ -1,19 +1,19 @@
 {
   "name": "pw-ws-server",
   "version": "0.1.0",
-  "description": "WebSocket transport for pw-monitor state — snapshot on connect, live events, bidirectional actions",
+  "description": "Generic protocol-driven WebSocket server framework",
   "type": "extension",
   "actions": {
     "ws-server-start": {
-      "entry": "src/actions/start.ts",
+      "entry": "dist/actions/start.js",
       "description": "Start WebSocket server for session"
     },
     "ws-server-stop": {
-      "entry": "src/actions/stop.ts",
+      "entry": "dist/actions/stop.js",
       "description": "Stop WebSocket server"
     },
     "ws-server-status": {
-      "entry": "src/actions/status.ts",
+      "entry": "dist/actions/status.js",
       "description": "Check WebSocket server status"
     }
   }
