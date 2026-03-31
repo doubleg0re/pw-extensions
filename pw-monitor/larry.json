@@ -14,8 +14,5 @@
       "entry": "dist/close-hook.js"
     }
   },
-  "events": {},
-  "rolling": {
-    "entry": "dist/rolling.js"
-  }
+  "events": {}
 }

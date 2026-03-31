@@ -150,7 +150,7 @@ function render(state) {
     document.getElementById('tabs-list').innerHTML = html;
   }
 
-  // Pending actions (with clickable buttons when WS connected)
+  // Pending actions (display-only — action dispatch handled by native renderer)
   const pending = state.pendingActions || [];
   if (pending.length === 0) {
     document.getElementById('pending-list').innerHTML = '<span class="empty">none</span>';
@@ -158,9 +158,7 @@ function render(state) {
     let html = '';
     for (const p of pending) {
       const buttons = (p.actions || []).map(a =>
-        `<button class="action-btn" data-tab="${p.tabId}" data-action="${esc(a)}"
-          style="background:#4f46e5;color:#fff;border:none;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:12px;margin-right:6px;"
-          ${wsConn ? '' : 'disabled title="Connect WS server to enable"'}>${esc(a)}</button>`
+        `<span style="background:#4f46e5;color:#fff;padding:4px 12px;border-radius:4px;font-size:12px;margin-right:6px;display:inline-block;">${esc(a)}</span>`
       ).join('');
       html += `<div class="pending-action">
         <div><span class="badge pending">tab ${p.tabId}</span></div>
@@ -169,23 +167,6 @@ function render(state) {
       </div>`;
     }
     document.getElementById('pending-list').innerHTML = html;
-
-    // Bind click handlers
-    document.querySelectorAll('.action-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (!wsConn) return;
-        const tabId = parseInt(btn.getAttribute('data-tab') || '0', 10);
-        const action = btn.getAttribute('data-action') || 'continue';
-        wsConn.send(JSON.stringify({
-          type: 'action',
-          action: 'user-action:click',
-          tabId,
-          data: { action },
-        }));
-        btn.textContent = 'sent...';
-        btn.setAttribute('disabled', 'true');
-      });
-    });
   }
 }
 

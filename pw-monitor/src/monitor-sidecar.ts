@@ -173,6 +173,15 @@ function handleCdpEvent(msg: any): void {
     case 'Target.targetCreated': {
       const { targetInfo } = params;
       if (targetInfo.type !== 'page') break;
+      // Check if this target already exists (reconnect/discovery duplicate)
+      const existing = findByCdpId(targetInfo.targetId);
+      if (existing) {
+        existing.url = targetInfo.url || existing.url;
+        existing.title = targetInfo.title || existing.title;
+        existing.lastSeenAt = now;
+        persistRegistry();
+        break;
+      }
       const entry: TabEntry = {
         tabId: nextId++,
         cdpTargetId: targetInfo.targetId,

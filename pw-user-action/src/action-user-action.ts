@@ -62,22 +62,34 @@ export default async function(page: any, args: any, runtime?: any): Promise<{ re
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      // Inject overlay
+      // Inject overlay (safe DOM construction — no innerHTML with user input)
       await page.evaluate(({ promptMsg, btns }: { promptMsg: string; btns: string[] }) => {
         document.getElementById('__pw_user_action_overlay')?.remove();
         const overlay = document.createElement('div');
         overlay.id = '__pw_user_action_overlay';
         overlay.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;background:#1a1a2e;color:#fff;padding:16px 24px;border-radius:8px;font-family:system-ui;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:400px;';
 
-        const buttonsHtml = btns.map(b =>
-          `<button class="__pw_action_btn" data-action="${b}" style="background:#4f46e5;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;font-size:14px;margin-right:8px;">${b}</button>`
-        ).join('');
+        const title = document.createElement('div');
+        title.style.cssText = 'font-weight:600;margin-bottom:8px;';
+        title.textContent = 'Waiting for user action';
+        overlay.appendChild(title);
 
-        overlay.innerHTML = `
-          <div style="font-weight:600;margin-bottom:8px;">Waiting for user action</div>
-          <div style="color:#ccc;margin-bottom:12px;">${promptMsg}</div>
-          <div>${buttonsHtml}</div>
-        `;
+        const promptEl = document.createElement('div');
+        promptEl.style.cssText = 'color:#ccc;margin-bottom:12px;';
+        promptEl.textContent = promptMsg;
+        overlay.appendChild(promptEl);
+
+        const btnContainer = document.createElement('div');
+        for (const b of btns) {
+          const btn = document.createElement('button');
+          btn.className = '__pw_action_btn';
+          btn.dataset.action = b;
+          btn.style.cssText = 'background:#4f46e5;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;font-size:14px;margin-right:8px;';
+          btn.textContent = b;
+          btnContainer.appendChild(btn);
+        }
+        overlay.appendChild(btnContainer);
+
         document.body.appendChild(overlay);
       }, { promptMsg: prompt, btns: actions });
 

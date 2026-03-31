@@ -35,15 +35,9 @@ export default async (ctx: any) => {
   const sessionDir = getSessionDir(ctx.session.name);
   const registryPath = join(sessionDir, 'monitor-tabs.json');
 
-  // If sidecar is alive, registry is already fresh — just read and emit
-  if (isSidecarAlive(registryPath)) {
-    const store = loadStore(registryPath);
-    ctx.logger.info(`sidecar active, ${store.count()} tabs tracked`);
-    return;
-  }
-
-  // Fallback: per-command sync (sidecar not running)
+  // Load store (sidecar keeps it fresh, but we still sync for event emission)
   const store = loadStore(registryPath);
+  const sidecarAlive = isSidecarAlive(registryPath);
 
   let liveTargets;
   try {
@@ -64,5 +58,5 @@ export default async (ctx: any) => {
   store.save(registryPath);
   ctx.registerCleanup(() => store.save(registryPath));
 
-  ctx.logger.info(`synced ${store.count()} tabs (${events.length} changes)`);
+  ctx.logger.info(`${sidecarAlive ? 'sidecar active, ' : ''}synced ${store.count()} tabs (${events.length} changes)`);
 };
