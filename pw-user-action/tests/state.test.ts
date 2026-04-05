@@ -1,6 +1,22 @@
 // state.test.ts — Unit tests for pending user-action state persistence
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { loadPending, savePending, addPending, removePending, getPending, clearAll, type PendingAction } from '../src/state.js';
+import {
+  addPending,
+  clearAll,
+  clearRequest,
+  clearResponse,
+  getPending,
+  loadPending,
+  loadRequest,
+  loadResponse,
+  removePending,
+  savePending,
+  saveRequest,
+  saveResponse,
+  type PendingAction,
+  type UserActionRequest,
+  type UserActionResponse,
+} from '../src/state.js';
 import { mkdtempSync, rmSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
@@ -102,5 +118,48 @@ describe('state persistence', () => {
       tabId: 1, prompt: 'focus test', actions: ['ok'], focus: '#email', createdAt: '2026-01-01T00:00:00Z',
     });
     expect(getPending(TEST_SESSION, 1)?.focus).toBe('#email');
+  });
+
+  it('preserves renderer field', () => {
+    addPending(TEST_SESSION, {
+      tabId: 1,
+      prompt: 'native dialog',
+      actions: ['approve'],
+      createdAt: '2026-01-01T00:00:00Z',
+      renderer: 'native-dialog',
+      visible: false,
+    });
+    expect(getPending(TEST_SESSION, 1)?.renderer).toBe('native-dialog');
+    expect(getPending(TEST_SESSION, 1)?.visible).toBe(false);
+  });
+
+  it('saves and loads dialog request files', () => {
+    const request: UserActionRequest = {
+      id: 'req-1',
+      session: TEST_SESSION,
+      tabId: 3,
+      prompt: 'Approve deployment?',
+      actions: ['approve', 'cancel'],
+      createdAt: '2026-01-01T00:00:00Z',
+      visible: false,
+    };
+    saveRequest(TEST_SESSION, request);
+    expect(loadRequest(TEST_SESSION)).toEqual(request);
+    clearRequest(TEST_SESSION);
+    expect(loadRequest(TEST_SESSION)).toBeUndefined();
+  });
+
+  it('saves and loads dialog response files', () => {
+    const response: UserActionResponse = {
+      id: 'req-1',
+      action: 'approve',
+      session: TEST_SESSION,
+      tabId: 3,
+      submittedAt: '2026-01-01T00:00:05Z',
+    };
+    saveResponse(TEST_SESSION, response);
+    expect(loadResponse(TEST_SESSION)).toEqual(response);
+    clearResponse(TEST_SESSION);
+    expect(loadResponse(TEST_SESSION)).toBeUndefined();
   });
 });

@@ -1,22 +1,31 @@
 // action-user-action.ts — pw-user-action custom sequence action
-// Owned by pw-persist-user-action extension. Shows overlay, waits for
-// user click, survives navigation. Manages pending state lifecycle.
+// Uses a native topmost dialog on Windows and falls back to browser
+// overlay elsewhere. Pending state stays session-scoped for monitor UI
+// and debug visibility.
 //
 // Usage in sequence:
 //   {"action": "pw-user-action", "prompt": "Click approve", "actions": ["approve", "cancel"]}
-import { addPending, removePending } from './state.js';
+import { addPending, removePending, updatePending } from './state.js';
+import { injectOverlay, readOverlaySelection, removeOverlay } from './overlay.js';
+import { canUseNativeDialog, showNativeDialog } from './native-dialog.js';
+import { isTabVisible, resolveMonitorTabId } from './monitor-state.js';
 export default async function (page, args, runtime) {
     const prompt = args?.prompt || args?.[0] || 'Complete the action, then click Continue';
     const actions = args?.actions || args?.[1] || ['continue'];
     const focus = args?.focus;
     const idle = Number(args?.idle) || 0;
-    // Headless guard
-    const isHeadless = await page.evaluate(() => !window.outerHeight || !window.outerWidth).catch(() => true);
-    if (isHeadless) {
-        throw new Error('pw-user-action requires --headed (no visible browser window for user interaction)');
-    }
     const sessionName = runtime?.session?.name;
-    const tabId = runtime?.tab?.id ?? 0;
+    const pageUrl = typeof page?.url === 'function' ? page.url() : runtime?.tab?.url;
+    const tabId = resolveMonitorTabId(sessionName, pageUrl, runtime?.tab?.id ?? 0);
+    const renderer = canUseNativeDialog() ? 'native-dialog' : 'browser-overlay';
+    const getVisible = createVisibilityTracker(sessionName, tabId);
+    const initialVisible = getVisible();
+    if (renderer === 'browser-overlay') {
+        const isHeadless = await page.evaluate(() => !window.outerHeight || !window.outerWidth).catch(() => true);
+        if (isHeadless) {
+            throw new Error('pw-user-action requires --headed when native dialog is unavailable (no visible browser window for fallback overlay)');
+        }
+    }
     // Persist pending state
     if (sessionName) {
         addPending(sessionName, {
@@ -25,6 +34,8 @@ export default async function (page, args, runtime) {
             actions,
             focus,
             createdAt: new Date().toISOString(),
+            renderer,
+            visible: initialVisible,
         });
     }
     // Emit started event
@@ -35,6 +46,8 @@ export default async function (page, args, runtime) {
             prompt,
             actions,
             focus,
+            renderer,
+            visible: initialVisible,
             timestamp: new Date().toISOString(),
         });
     }
@@ -46,69 +59,35 @@ export default async function (page, args, runtime) {
     if (idle > 0) {
         await new Promise(r => setTimeout(r, idle));
     }
-    // Navigation-resilient loop: inject overlay, wait for click.
-    // If navigation destroys the context, wait for load and re-inject.
-    const MAX_RETRIES = 20;
     let clicked;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-        try {
-            // Inject overlay (safe DOM construction — no innerHTML with user input)
-            await page.evaluate(({ promptMsg, btns }) => {
-                document.getElementById('__pw_user_action_overlay')?.remove();
-                const overlay = document.createElement('div');
-                overlay.id = '__pw_user_action_overlay';
-                overlay.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;background:#1a1a2e;color:#fff;padding:16px 24px;border-radius:8px;font-family:system-ui;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:400px;';
-                const title = document.createElement('div');
-                title.style.cssText = 'font-weight:600;margin-bottom:8px;';
-                title.textContent = 'Waiting for user action';
-                overlay.appendChild(title);
-                const promptEl = document.createElement('div');
-                promptEl.style.cssText = 'color:#ccc;margin-bottom:12px;';
-                promptEl.textContent = promptMsg;
-                overlay.appendChild(promptEl);
-                const btnContainer = document.createElement('div');
-                for (const b of btns) {
-                    const btn = document.createElement('button');
-                    btn.className = '__pw_action_btn';
-                    btn.dataset.action = b;
-                    btn.style.cssText = 'background:#4f46e5;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;font-size:14px;margin-right:8px;';
-                    btn.textContent = b;
-                    btnContainer.appendChild(btn);
-                }
-                overlay.appendChild(btnContainer);
-                document.body.appendChild(overlay);
-            }, { promptMsg: prompt, btns: actions });
-            // Wait for button click
-            clicked = await page.evaluate(() => {
-                return new Promise((resolve) => {
-                    document.querySelectorAll('.__pw_action_btn').forEach(btn => {
-                        btn.addEventListener('click', () => {
-                            resolve(btn.dataset.action || 'continue');
-                        });
-                    });
-                });
+    let submittedAt;
+    try {
+        if (renderer === 'native-dialog' && sessionName) {
+            const response = await showNativeDialog({
+                session: sessionName,
+                tabId,
+                prompt,
+                actions,
+                focus,
+                visible: initialVisible,
+                runtime,
+                getVisible,
             });
-            // Remove overlay
-            await page.evaluate(() => {
-                document.getElementById('__pw_user_action_overlay')?.remove();
-            }).catch(() => { });
-            break;
+            clicked = response.action;
+            submittedAt = response.submittedAt;
         }
-        catch (err) {
-            const msg = err.message || '';
-            if (msg.includes('Execution context was destroyed') || msg.includes('navigation')) {
-                await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
-                continue;
-            }
-            throw err;
+        else {
+            clicked = await waitForBrowserOverlay(page, prompt, actions, getVisible);
+            submittedAt = new Date().toISOString();
         }
     }
-    if (!clicked) {
-        throw new Error('pw-user-action: overlay destroyed too many times by navigation (max retries exceeded)');
-    }
-    // Clear pending state
-    if (sessionName) {
-        removePending(sessionName, tabId);
+    finally {
+        if (sessionName) {
+            removePending(sessionName, tabId);
+        }
+        if (renderer === 'browser-overlay') {
+            await removeOverlay(page).catch(() => { });
+        }
     }
     // Emit completed event
     if (runtime?.emitEvent) {
@@ -116,8 +95,65 @@ export default async function (page, args, runtime) {
             session: sessionName,
             tabId,
             action: clicked,
-            timestamp: new Date().toISOString(),
+            renderer,
+            timestamp: submittedAt || new Date().toISOString(),
         });
     }
-    return { result: { waited: 'pw-user-action', prompt, action: clicked } };
+    return {
+        result: {
+            waited: 'pw-user-action',
+            prompt,
+            action: clicked,
+            renderer,
+            session: sessionName,
+            tabId,
+            submittedAt,
+        },
+    };
+}
+async function waitForBrowserOverlay(page, prompt, actions, getVisible) {
+    let overlayVisible = false;
+    while (true) {
+        const shouldShow = getVisible();
+        try {
+            if (shouldShow && !overlayVisible) {
+                await injectOverlay(page, prompt, actions);
+                overlayVisible = true;
+            }
+            else if (!shouldShow && overlayVisible) {
+                await removeOverlay(page);
+                overlayVisible = false;
+            }
+            const clicked = await readOverlaySelection(page);
+            if (clicked) {
+                await removeOverlay(page).catch(() => { });
+                return clicked;
+            }
+        }
+        catch (err) {
+            const msg = err?.message || '';
+            if (msg.includes('Execution context was destroyed') || msg.includes('navigation')) {
+                overlayVisible = false;
+                await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => { });
+            }
+            else {
+                throw err;
+            }
+        }
+        await new Promise(resolve => setTimeout(resolve, 150));
+    }
+}
+function createVisibilityTracker(sessionName, tabId) {
+    let lastVisible;
+    return () => {
+        const visible = isTabVisible(sessionName, tabId);
+        if (sessionName && visible !== lastVisible) {
+            try {
+                updatePending(sessionName, tabId, { visible });
+            }
+            catch { }
+        }
+        lastVisible = visible;
+        return visible;
+    };
 }

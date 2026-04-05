@@ -2,7 +2,7 @@
 // Persist pending action state so it can be restored after navigation.
 import { addPending } from './state.js';
 export default async (payload) => {
-    const { session, tabId, prompt, actions, focus } = payload;
+    const { session, tabId, prompt, actions, focus, renderer, visible } = payload;
     if (!session || tabId == null)
         return;
     addPending(session, {
@@ -11,5 +11,7 @@ export default async (payload) => {
         actions: actions || ['continue'],
         focus,
         createdAt: new Date().toISOString(),
+        renderer: renderer || 'browser-overlay',
+        visible,
     });
 };

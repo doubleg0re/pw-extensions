@@ -1,6 +1,6 @@
-// load-hook.ts — Load hook for pw-persist-user-action
-// On each command start, check if the current tab has a pending user-action
-// and re-inject the overlay if so.
+// load-hook.ts — Load hook for pw-user-action
+// On each command start, check if the current tab has a pending browser-overlay
+// user-action and re-inject it if needed.
 import { getPending } from './state.js';
 import { injectOverlay } from './overlay.js';
 
@@ -13,6 +13,8 @@ export default async (ctx: any) => {
 
   const pending = getPending(session, tabId);
   if (!pending) return;
+  if (pending.renderer && pending.renderer !== 'browser-overlay') return;
+  if (pending.visible === false) return;
 
   const page = ctx.getPage ? await ctx.getPage() : ctx.page;
   if (!page) return;

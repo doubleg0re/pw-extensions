@@ -1,11 +1,11 @@
 {
   "name": "pw-user-action",
   "version": "0.2.0",
-  "description": "User-action overlay — navigation-resilient, persistent state, native renderer ready",
+  "description": "Native topmost user-action prompt with browser-overlay fallback",
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "tsc"
+    "build": "tsc && node scripts/build-native.mjs"
   },
   "devDependencies": {
     "typescript": "^5.0.0",

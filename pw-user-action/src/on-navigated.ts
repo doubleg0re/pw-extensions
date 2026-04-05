@@ -1,5 +1,6 @@
 // on-navigated.ts — Event handler for tab:navigated
-// When a tab navigates and has a pending user-action, re-inject the overlay.
+// When a tab navigates and has a pending browser-overlay user-action,
+// re-inject the overlay.
 import { getPending } from './state.js';
 import { injectOverlay } from './overlay.js';
 
@@ -9,6 +10,8 @@ export default async (payload: any, ctx?: any) => {
 
   const pending = getPending(session, tabId);
   if (!pending) return;
+  if (pending.renderer && pending.renderer !== 'browser-overlay') return;
+  if (pending.visible === false) return;
 
   // Need the page to re-inject — get it from runtime context
   const page = ctx?.getPage ? await ctx.getPage() : ctx?.page;

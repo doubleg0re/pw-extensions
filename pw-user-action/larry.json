@@ -1,12 +1,12 @@
 {
   "name": "pw-user-action",
   "version": "0.2.0",
-  "description": "User-action overlay — navigation-resilient, persistent state, native renderer ready",
+  "description": "Native topmost user-action prompt with browser-overlay fallback",
   "type": "extension",
   "actions": {
     "pw-user-action": {
       "entry": "dist/action-user-action.js",
-      "description": "Show overlay with action buttons, survive navigation, return clicked action"
+      "description": "Show a native topmost prompt when available, return the clicked action"
     }
   },
   "hooks": {
@@ -15,6 +15,12 @@
     }
   },
   "events": {
+    "tab:activated": {
+      "entry": "dist/on-activated.js"
+    },
+    "tab:deactivated": {
+      "entry": "dist/on-deactivated.js"
+    },
     "tab:navigated": {
       "entry": "dist/on-navigated.js"
     },

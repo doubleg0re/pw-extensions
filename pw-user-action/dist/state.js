@@ -5,8 +5,17 @@ import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirS
 import { dirname, join } from 'path';
 import { randomBytes } from 'crypto';
 import { homedir } from 'os';
+export function sessionStateDir(sessionName) {
+    return join(homedir(), '.playwright-state', 'sessions', sessionName);
+}
 function statePath(sessionName) {
-    return join(homedir(), '.playwright-state', 'sessions', sessionName, 'pending-actions.json');
+    return join(sessionStateDir(sessionName), 'pending-actions.json');
+}
+export function requestPath(sessionName) {
+    return join(sessionStateDir(sessionName), 'user-action-request.json');
+}
+export function responsePath(sessionName) {
+    return join(sessionStateDir(sessionName), 'user-action-response.json');
 }
 export function loadPending(sessionName) {
     const path = statePath(sessionName);
@@ -28,7 +37,7 @@ export function savePending(sessionName, pending) {
     atomicWriteJSON(path, { pending });
 }
 export function addPending(sessionName, action) {
-    const lockPath = join(dirname(statePath(sessionName)), '.pending-actions.lock');
+    const lockPath = join(sessionStateDir(sessionName), '.pending-actions.lock');
     simpleLock(lockPath);
     try {
         const list = loadPending(sessionName);
@@ -41,11 +50,23 @@ export function addPending(sessionName, action) {
     }
 }
 export function removePending(sessionName, tabId) {
-    const lockPath = join(dirname(statePath(sessionName)), '.pending-actions.lock');
+    const lockPath = join(sessionStateDir(sessionName), '.pending-actions.lock');
     simpleLock(lockPath);
     try {
         const list = loadPending(sessionName);
         savePending(sessionName, list.filter(p => p.tabId !== tabId));
+    }
+    finally {
+        simpleUnlock(lockPath);
+    }
+}
+export function updatePending(sessionName, tabId, updates) {
+    const lockPath = join(sessionStateDir(sessionName), '.pending-actions.lock');
+    simpleLock(lockPath);
+    try {
+        const list = loadPending(sessionName);
+        const next = list.map(entry => entry.tabId === tabId ? { ...entry, ...updates } : entry);
+        savePending(sessionName, next);
     }
     finally {
         simpleUnlock(lockPath);
@@ -56,6 +77,40 @@ export function getPending(sessionName, tabId) {
 }
 export function clearAll(sessionName) {
     savePending(sessionName, []);
+}
+export function saveRequest(sessionName, request) {
+    const path = requestPath(sessionName);
+    const dir = dirname(path);
+    if (!existsSync(dir))
+        mkdirSync(dir, { recursive: true });
+    atomicWriteJSON(path, request);
+}
+export function loadRequest(sessionName) {
+    return loadJSON(requestPath(sessionName));
+}
+export function clearRequest(sessionName) {
+    safeUnlink(requestPath(sessionName));
+}
+export function updateRequest(sessionName, updates) {
+    const current = loadRequest(sessionName);
+    if (!current)
+        return undefined;
+    const next = { ...current, ...updates };
+    saveRequest(sessionName, next);
+    return next;
+}
+export function saveResponse(sessionName, response) {
+    const path = responsePath(sessionName);
+    const dir = dirname(path);
+    if (!existsSync(dir))
+        mkdirSync(dir, { recursive: true });
+    atomicWriteJSON(path, response);
+}
+export function loadResponse(sessionName) {
+    return loadJSON(responsePath(sessionName));
+}
+export function clearResponse(sessionName) {
+    safeUnlink(responsePath(sessionName));
 }
 // Simple file lock (self-contained, no core dependency)
 function simpleLock(lockPath) {
@@ -96,7 +151,7 @@ function simpleUnlock(lockPath) {
         // Only release if we own the lock
         const ownerPid = parseInt(readFileSync(lockPath, 'utf-8').trim(), 10);
         if (!ownerPid || ownerPid === process.pid) {
-            unlinkSync(lockPath);
+            safeUnlink(lockPath);
         }
     }
     catch { }
@@ -104,9 +159,22 @@ function simpleUnlock(lockPath) {
 function atomicWriteJSON(filePath, data) {
     const tmp = join(dirname(filePath), `.tmp-${randomBytes(4).toString('hex')}.json`);
     writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+    safeUnlink(filePath);
+    renameSync(tmp, filePath);
+}
+function loadJSON(filePath) {
+    if (!existsSync(filePath))
+        return undefined;
+    try {
+        return JSON.parse(readFileSync(filePath, 'utf-8'));
+    }
+    catch {
+        return undefined;
+    }
+}
+function safeUnlink(filePath) {
     try {
         unlinkSync(filePath);
     }
     catch { }
-    renameSync(tmp, filePath);
 }

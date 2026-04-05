@@ -1,1 +1,5 @@
 node_modules/
+
+# Rust build artifacts
+**/tauri/target/
+**/target/

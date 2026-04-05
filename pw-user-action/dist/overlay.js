@@ -9,6 +9,7 @@ export async function injectOverlay(page, prompt, actions) {
     }).catch(() => { });
     // Inject overlay with action buttons (safe DOM construction — no innerHTML)
     await page.evaluate(({ promptMsg, btns }) => {
+        window.__pw_user_action_selected = null;
         const overlay = document.createElement('div');
         overlay.id = '__pw_user_action_overlay';
         overlay.style.cssText = 'position:fixed;top:16px;right:16px;z-index:999999;background:#1a1a2e;color:#fff;padding:16px 24px;border-radius:8px;font-family:system-ui;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.3);max-width:400px;';
@@ -27,6 +28,9 @@ export async function injectOverlay(page, prompt, actions) {
             btn.dataset.action = b;
             btn.style.cssText = 'background:#4f46e5;color:#fff;border:none;padding:8px 20px;border-radius:4px;cursor:pointer;font-size:14px;margin-right:8px;';
             btn.textContent = b;
+            btn.addEventListener('click', () => {
+                window.__pw_user_action_selected = b;
+            });
             btnContainer.appendChild(btn);
         }
         overlay.appendChild(btnContainer);
@@ -43,6 +47,15 @@ export async function waitForClick(page) {
                 });
             });
         });
+    });
+}
+export async function readOverlaySelection(page) {
+    return page.evaluate(() => {
+        const selected = window.__pw_user_action_selected;
+        if (!selected)
+            return null;
+        window.__pw_user_action_selected = null;
+        return String(selected);
     });
 }
 /** Remove the overlay from the page */
