@@ -392,6 +392,14 @@ async function connect(): Promise<void> {
       return;
     }
 
+    // If our dialog is the foreground window, Chromium will report
+    // focused=false — that's cosmetic, not a real "user switched away".
+    // Skip so browserFocused doesn't flip while the dialog is up.
+    if (data.focused === false) {
+      const fg = await getForegroundInfo();
+      if (fg?.type === 'dialog') return;
+    }
+
     // When focus returns, double-check window state (covers minimize)
     let newVisible = browserVisible;
     if (data.focused === true || data.visible === false) {
@@ -440,21 +448,34 @@ async function connect(): Promise<void> {
           void attachAndInstrument(target.id);
         }
 
-        // Poll focus/visibility
+        // Poll focus/visibility — tracked per-windowId, not per-tab.
+        //
+        // Rationale: tabs within the same window share one Chromium window,
+        // so their "visible" state (minimized or not) is identical. Per-tab
+        // state queries caused flicker because the "active tab" selection
+        // could oscillate between tabs and we'd re-query an unrelated
+        // window's state. Keying by windowId fixes that.
         if (tabs.size > 0) {
-          // Get all tabs' bounds via CDP (needed for multi-window matching)
-          const tabBoundsMap = new Map<number, WindowBounds>();
+          // One pass: build tab→windowId map and windowId→{bounds,state} map.
+          // Each unique windowId is queried only once per poll.
+          const tabToWindowId = new Map<number, number>();
+          const windowStateMap = new Map<number, { bounds: WindowBounds; state: string }>();
           for (const [tabId, entry] of tabs.entries()) {
             try {
               const winResult = await sendAndWait('Browser.getWindowForTarget', {
                 targetId: entry.cdpTargetId,
               });
               const windowId = winResult?.windowId;
-              if (windowId != null) {
+              if (windowId == null) continue;
+              tabToWindowId.set(tabId, windowId);
+              if (!windowStateMap.has(windowId)) {
                 const boundsResult = await sendAndWait('Browser.getWindowBounds', { windowId });
                 const b = boundsResult?.bounds;
                 if (b) {
-                  tabBoundsMap.set(tabId, { x: b.left, y: b.top, width: b.width, height: b.height });
+                  windowStateMap.set(windowId, {
+                    bounds: { x: b.left, y: b.top, width: b.width, height: b.height },
+                    state: b.windowState || 'normal',
+                  });
                 }
               }
             } catch {}
@@ -464,53 +485,65 @@ async function connect(): Promise<void> {
           const fgInfo = await getForegroundInfo();
 
           let newActiveTabId = activeTabId;
+          let newActiveWindowId: number | null =
+            activeTabId != null ? (tabToWindowId.get(activeTabId) ?? null) : null;
           let newFocused = browserFocused;
 
           if (fgInfo?.type === 'dialog') {
             // Dialog is in foreground — keep current state as-is (prevent flicker)
           } else if (fgInfo?.type === 'browser') {
-            // Strategy: for same-window tab switching, we trust /json's top tab.
-            // For multi-window, we need bounds matching to find the right window.
-            //
-            // 1. If jsonTopTab's bounds match foreground window → use jsonTopTab
-            //    (handles same-window: /json correctly orders tabs within a window)
-            // 2. Otherwise → search all tabs for bounds match
-            //    (handles multi-window: different window bounds)
-            if (jsonTopTabId != null && tabBoundsMap.has(jsonTopTabId) &&
-                boundsMatch(fgInfo.bounds, tabBoundsMap.get(jsonTopTabId)!)) {
-              newActiveTabId = jsonTopTabId;
-              newFocused = true;
-            } else {
-              let matched = false;
-              for (const [tabId, bounds] of tabBoundsMap.entries()) {
-                if (boundsMatch(fgInfo.bounds, bounds)) {
-                  newActiveTabId = tabId;
-                  newFocused = true;
-                  matched = true;
+            // Match foreground window by bounds. Prefer /json's top tab if its
+            // window's bounds match (handles same-window tab switching), else
+            // search all known windows (handles multi-window).
+            let matchedWindowId: number | null = null;
+            if (jsonTopTabId != null) {
+              const wid = tabToWindowId.get(jsonTopTabId);
+              if (wid != null && windowStateMap.has(wid) &&
+                  boundsMatch(fgInfo.bounds, windowStateMap.get(wid)!.bounds)) {
+                matchedWindowId = wid;
+                newActiveTabId = jsonTopTabId;
+              }
+            }
+            if (matchedWindowId == null) {
+              for (const [wid, info] of windowStateMap.entries()) {
+                if (boundsMatch(fgInfo.bounds, info.bounds)) {
+                  matchedWindowId = wid;
+                  // Pick a tab belonging to this window; prefer jsonTopTab if it's in here
+                  if (jsonTopTabId != null && tabToWindowId.get(jsonTopTabId) === wid) {
+                    newActiveTabId = jsonTopTabId;
+                  } else {
+                    for (const [tid, w] of tabToWindowId.entries()) {
+                      if (w === wid) { newActiveTabId = tid; break; }
+                    }
+                  }
                   break;
                 }
               }
-              if (!matched) newFocused = false;
+            }
+            if (matchedWindowId != null) {
+              newActiveWindowId = matchedWindowId;
+              newFocused = true;
+            } else {
+              newFocused = false;
             }
           } else {
             // Neither browser nor dialog is in foreground
             newFocused = false;
           }
 
-          // Check active tab's window minimize state
+          // browserVisible: based on the active window's state. If the
+          // active window is unknown or state query failed, keep the
+          // previous value instead of flipping.
           let newWindowVisible = browserVisible;
-          if (newActiveTabId) {
-            const entry = tabs.get(newActiveTabId);
-            if (entry) {
-              newWindowVisible = await checkWindowState(entry.cdpTargetId);
-            }
+          if (newActiveWindowId != null && windowStateMap.has(newActiveWindowId)) {
+            newWindowVisible = windowStateMap.get(newActiveWindowId)!.state !== 'minimized';
           }
 
           // Debug: log every poll
           const fgB = fgInfo?.type === 'browser' ? fgInfo.bounds : null;
           const fgType = fgInfo?.type || 'none';
-          const activeB = newActiveTabId != null ? tabBoundsMap.get(newActiveTabId) : null;
-          process.stderr.write(`[monitor-sidecar] poll: vis=${newWindowVisible} fc=${newFocused} tab=${newActiveTabId} fgType=${fgType} fg=${JSON.stringify(fgB)} active=${JSON.stringify(activeB)} tabsMap=${tabBoundsMap.size}\n`);
+          const activeWinInfo = newActiveWindowId != null ? windowStateMap.get(newActiveWindowId) : null;
+          process.stderr.write(`[monitor-sidecar] poll: vis=${newWindowVisible} fc=${newFocused} tab=${newActiveTabId} win=${newActiveWindowId} fgType=${fgType} fg=${JSON.stringify(fgB)} activeWin=${JSON.stringify(activeWinInfo)} windows=${windowStateMap.size}\n`);
 
           if (
             newWindowVisible !== browserVisible ||
