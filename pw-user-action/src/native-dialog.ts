@@ -17,6 +17,7 @@ export interface NativeDialogOptions {
   tabId: number;
   prompt: string;
   actions: string[];
+  title?: string;
   focus?: string;
   visible?: boolean;
   runtime?: {
@@ -71,13 +72,14 @@ export async function showNativeDialog(opts: NativeDialogOptions): Promise<UserA
     } catch {}
   });
 
-  // Send init command
-  const initCmd = {
+  // Send init command (title optional, defaults to "pw-user-action" in renderer)
+  const initCmd: Record<string, unknown> = {
     type: 'init',
     id: requestId,
     prompt: opts.prompt,
     actions: opts.actions,
   };
+  if (opts.title) initCmd.title = opts.title;
   child.stdin!.write(JSON.stringify(initCmd) + '\n');
 
   let exitCode: number | null = null;

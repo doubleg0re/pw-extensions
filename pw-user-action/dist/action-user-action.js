@@ -12,6 +12,7 @@ import { isTabVisible, resolveMonitorTabId } from './monitor-state.js';
 export default async function (page, args, runtime) {
     const prompt = args?.prompt || args?.[0] || 'Complete the action, then click Continue';
     const actions = args?.actions || args?.[1] || ['continue'];
+    const title = args?.title;
     const focus = args?.focus;
     const idle = Number(args?.idle) || 0;
     const sessionName = runtime?.session?.name;
@@ -68,6 +69,7 @@ export default async function (page, args, runtime) {
                 tabId,
                 prompt,
                 actions,
+                title,
                 focus,
                 visible: initialVisible,
                 runtime,

@@ -45,13 +45,15 @@ export async function showNativeDialog(opts) {
         }
         catch { }
     });
-    // Send init command
+    // Send init command (title optional, defaults to "pw-user-action" in renderer)
     const initCmd = {
         type: 'init',
         id: requestId,
         prompt: opts.prompt,
         actions: opts.actions,
     };
+    if (opts.title)
+        initCmd.title = opts.title;
     child.stdin.write(JSON.stringify(initCmd) + '\n');
     let exitCode = null;
     let exitSignal = null;
