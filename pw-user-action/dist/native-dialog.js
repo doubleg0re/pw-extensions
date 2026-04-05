@@ -126,19 +126,38 @@ export async function showNativeDialog(opts) {
                 ready = true;
             }
         }
-        // Subscribe to monitor state via pw-ws-server (real-time via fs.watch)
-        // Falls back to opts.visible if ws-server isn't available
+        // Subscribe to pw-monitor state via the pw-monitor client module.
+        // Transport (pw-ws-server) is a private implementation detail.
         let subscription = null;
         let lastSentVisible = null;
+        // If the caller didn't pass a concrete tabId we lock onto whatever tab
+        // is active at subscription time. That becomes the dialog's "owner" tab.
+        let ownerTabId = opts.tabId && opts.tabId > 0 ? opts.tabId : null;
+        // Visibility rules — hide the dialog when:
+        //   (a) browser is minimized (browserVisible === false)
+        //   (b) some other app (terminal, another browser, ...) has focus
+        //       (browserFocused === false)
+        //   (c) user switched to a different tab in the same browser session
+        //       (active !== ownerTabId)
+        // Case (b) is the important one: the dialog should not float over an
+        // unrelated app. The sidecar skips state updates while the dialog
+        // itself holds foreground (fgType=dialog branch), so dialog focus does
+        // NOT flip browserFocused to false.
         const computeVisible = (state) => {
             if (state.browserVisible === false)
                 return false;
             if (state.browserFocused === false)
                 return false;
             const active = state.activeTabId;
+            if (ownerTabId == null) {
+                // Lock onto first non-null activeTabId
+                if (typeof active === 'number' && active > 0)
+                    ownerTabId = active;
+                return true;
+            }
             if (active === null || active === undefined)
                 return true;
-            return active === opts.tabId;
+            return active === ownerTabId;
         };
         const sendVisibility = (visible) => {
             if (visible === lastSentVisible)
@@ -154,16 +173,16 @@ export async function showNativeDialog(opts) {
             subscription = await subscribeMonitor(opts.session, (state) => {
                 sendVisibility(computeVisible(state));
             });
-            process.stderr.write(`[native-dialog] ws monitor subscribed, initial state: ${JSON.stringify({
+            process.stderr.write(`[native-dialog] monitor subscribed, initial state: ${JSON.stringify({
                 activeTabId: subscription.initial.activeTabId,
                 browserVisible: subscription.initial.browserVisible,
                 browserFocused: subscription.initial.browserFocused,
             })}\n`);
-            // Initial state already delivered via onUpdate in subscribeMonitor
+            sendVisibility(computeVisible(subscription.initial));
         }
         catch (err) {
-            process.stderr.write(`[native-dialog] ws subscribe failed: ${err.message}, using initial visible\n`);
-            sendVisibility(opts.visible ?? true);
+            process.stderr.write(`[native-dialog] monitor subscribe failed: ${err?.message || String(err)}, defaulting to visible\n`);
+            sendVisibility(true);
         }
         try {
             // Wait for clicked event

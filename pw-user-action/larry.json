@@ -3,6 +3,14 @@
   "version": "0.2.0",
   "description": "Native topmost user-action prompt with browser-overlay fallback",
   "type": "extension",
+  "extension": {
+    "dependencies": {
+      "pw-monitor": "builtin:pw-monitor"
+    },
+    "consumes": {
+      "protocols": ["pw-monitor/v1"]
+    }
+  },
   "actions": {
     "pw-user-action": {
       "entry": "dist/action-user-action.js",
