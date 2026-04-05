@@ -1,19 +1,30 @@
 #!/usr/bin/env npx tsx
-// server.ts — Generic protocol-driven WebSocket server
-// Wraps Node ws package. Protocols are JSON definitions, handlers are scripts.
+// server.ts — Generic provider-hosting WebSocket server
 //
-// Usage: server.ts <sessionName> [--protocol=monitor] [--port=47831] [--host=127.0.0.1]
+// pw-ws-server is transport only. It does not define domain protocols.
+// Instead, it discovers providers from active rary extensions via their
+// larry.json extension.provides.protocols declarations, dynamically
+// imports each provider, and serves them on channels over WebSocket.
+//
+// Wire protocol:
+//   Server → client:
+//     { type: "snapshot", channel, data, timestamp }   - initial state on subscribe
+//     { type: "event",    channel, data, timestamp }   - state updates
+//     { type: "pong",     message?, timestamp }
+//     { type: "error",    error, details? }
+//   Client → server:
+//     { type: "subscribe",   channel }                 - get snapshot + events
+//     { type: "unsubscribe", channel }
+//     { type: "list" }                                 - list available channels
+//     { type: "ping",  message? }
+//
+// Usage: server.ts <sessionName> [--port=47831] [--host=127.0.0.1]
 
 import { WebSocketServer, WebSocket } from 'ws';
 import { writeFileSync, unlinkSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
-import {
-  resolveProtocolPath,
-  loadProtocol,
-  validateSchema,
-  type LoadedProtocol,
-} from './protocol-loader.js';
+import { loadProviders, type LoadedProvider } from './provider-loader.js';
 
 // --- CLI args ---
 
@@ -21,55 +32,30 @@ const args = process.argv.slice(2);
 const sessionName = args.find(a => !a.startsWith('--'));
 const portFlag = args.find(a => a.startsWith('--port='));
 const hostFlag = args.find(a => a.startsWith('--host='));
-const protocolFlag = args.find(a => a.startsWith('--protocol='));
 const port = portFlag ? parseInt(portFlag.slice('--port='.length), 10) : 47831;
 const host = hostFlag ? hostFlag.slice('--host='.length) : '127.0.0.1';
-const protocolName = protocolFlag ? protocolFlag.slice('--protocol='.length) : 'monitor';
 
 if (!sessionName) {
-  process.stderr.write('Usage: server.ts <sessionName> [--protocol=monitor] [--port=47831] [--host=127.0.0.1]\n');
+  process.stderr.write('Usage: server.ts <sessionName> [--port=47831] [--host=127.0.0.1]\n');
   process.exit(1);
 }
 
 const sessionDir = join(homedir(), '.playwright-state', 'sessions', sessionName);
 const metadataPath = join(sessionDir, 'ws-server.json');
 
-// --- Source adapters registry ---
-
-const sourceAdapters: Record<string, any> = {};
-
-async function loadSourceAdapter(name: string): Promise<any> {
-  if (sourceAdapters[name]) return sourceAdapters[name];
-  const mod = await import(`./sources/${name}.js`);
-  // Try multiple naming conventions for the export
-  const camelName = name.replace(/-(\w)/g, (_, c) => c.toUpperCase()); // pw-monitor → pwMonitor
-  const adapter =
-    mod[`${camelName}Adapter`] ||                   // pwMonitorAdapter (preferred)
-    mod[`${name.replace(/-/g, '')}Adapter`] ||      // pwmonitorAdapter (legacy)
-    mod.default ||
-    mod;
-  sourceAdapters[name] = adapter;
-  return adapter;
+// Per-client subscription state
+interface ClientState {
+  subscriptions: Set<string>;
+  unsubscribeFns: Map<string, () => void>;
 }
 
-// --- Main ---
+const clientStates = new WeakMap<WebSocket, ClientState>();
 
 async function main(): Promise<void> {
-  // Load protocol
-  const protocolPath = resolveProtocolPath(protocolName);
-  const protocol = await loadProtocol(protocolPath);
-  process.stderr.write(`[pw-ws-server] protocol: ${protocol.def.name} v${protocol.def.version || '0'}\n`);
-
-  // Load source adapter if specified
-  let source: any = null;
-  let unsubscribe: (() => void) | null = null;
-
-  if (protocol.def.source?.adapter) {
-    source = await loadSourceAdapter(protocol.def.source.adapter);
-    process.stderr.write(`[pw-ws-server] source: ${source.name}\n`);
-  }
-
-  // --- WebSocket server ---
+  // Load providers from active extensions
+  const { providers, warnings } = await loadProviders('ws');
+  for (const w of warnings) process.stderr.write(`[pw-ws-server] ${w}\n`);
+  process.stderr.write(`[pw-ws-server] loaded ${providers.size} provider(s): ${[...providers.keys()].join(', ') || '(none)'}\n`);
 
   const wss = new WebSocketServer({ port, host });
 
@@ -77,67 +63,47 @@ async function main(): Promise<void> {
     const metadata = {
       pid: process.pid,
       session: sessionName,
-      protocol: protocol.def.name,
       host,
       port,
+      channels: [...providers.keys()],
       startedAt: new Date().toISOString(),
     };
     writeFileSync(metadataPath, JSON.stringify(metadata, null, 2));
     process.stderr.write(`[pw-ws-server] listening on ws://${host}:${port}\n`);
   });
 
-  // --- Connection handling ---
+  wss.on('connection', (ws: WebSocket) => {
+    clientStates.set(ws, { subscriptions: new Set(), unsubscribeFns: new Map() });
 
-  wss.on('connection', async (ws: WebSocket) => {
-    // Build handler context for this client
-    const ctx = buildContext(ws, wss, sessionName, source, protocol);
-
-    // Run onConnect hook
-    if (protocol.hooks.onConnect) {
-      try { await protocol.hooks.onConnect(ctx); } catch (err: any) {
-        process.stderr.write(`[pw-ws-server] onConnect hook error: ${err.message}\n`);
-      }
-    }
-
-    // Handle incoming messages
     ws.on('message', async (raw: Buffer) => {
+      let msg: any;
       try {
-        const msg = JSON.parse(typeof raw === 'string' ? raw : raw.toString());
-        await dispatchMessage(msg, ctx, protocol);
+        msg = JSON.parse(typeof raw === 'string' ? raw : raw.toString());
+      } catch {
+        safeSend(ws, { type: 'error', error: 'Invalid JSON' });
+        return;
+      }
+      try {
+        await handleMessage(ws, msg, providers);
       } catch (err: any) {
-        try { ws.send(JSON.stringify({ type: 'error', error: 'Invalid JSON' })); } catch {}
+        safeSend(ws, { type: 'error', error: `Handler error: ${err?.message || String(err)}` });
       }
     });
 
-    // Run onDisconnect hook
-    ws.on('close', async () => {
-      if (protocol.hooks.onDisconnect) {
-        try { await protocol.hooks.onDisconnect(ctx); } catch {}
+    ws.on('close', () => {
+      const state = clientStates.get(ws);
+      if (state) {
+        for (const unsub of state.unsubscribeFns.values()) {
+          try { unsub(); } catch {}
+        }
+        state.unsubscribeFns.clear();
+        state.subscriptions.clear();
       }
+      clientStates.delete(ws);
     });
   });
 
-  // --- Source adapter subscription (broadcast on change) ---
-
-  if (source && protocol.def.source?.watch) {
-    unsubscribe = source.subscribe(sessionName, (snapshot: any) => {
-      const msg = JSON.stringify({
-        type: 'event',
-        source: protocol.def.name,
-        session: sessionName,
-        data: snapshot,
-        timestamp: new Date().toISOString(),
-      });
-      for (const client of wss.clients) {
-        if (client.readyState === WebSocket.OPEN) {
-          try { client.send(msg); } catch {}
-        }
-      }
-    });
-  }
-
-  // --- Session liveness check ---
-
+  // Session liveness check
   const sessionCheck = setInterval(() => {
     const sessionJsonPath = join(sessionDir, 'session.json');
     if (!existsSync(sessionJsonPath)) {
@@ -156,7 +122,6 @@ async function main(): Promise<void> {
 
   function shutdown(): void {
     clearInterval(sessionCheck);
-    if (unsubscribe) unsubscribe();
     wss.close();
     try { unlinkSync(metadataPath); } catch {}
     process.exit(0);
@@ -173,67 +138,96 @@ async function main(): Promise<void> {
   });
 }
 
-// --- Message dispatch ---
-
-async function dispatchMessage(msg: any, ctx: any, protocol: LoadedProtocol): Promise<void> {
+async function handleMessage(
+  ws: WebSocket,
+  msg: any,
+  providers: Map<string, LoadedProvider>,
+): Promise<void> {
   const msgType = msg.type;
   if (!msgType) {
-    ctx.send({ type: 'error', error: 'Message must have a "type" field' });
+    safeSend(ws, { type: 'error', error: 'Message must have a "type" field' });
     return;
   }
 
-  const handler = protocol.handlers.get(msgType);
-  if (!handler) {
-    ctx.send({ type: 'error', error: `Unknown message type: "${msgType}"` });
-    return;
-  }
+  switch (msgType) {
+    case 'ping':
+      safeSend(ws, { type: 'pong', message: msg.message, timestamp: new Date().toISOString() });
+      return;
 
-  // Schema validation (if defined)
-  if (handler.schema) {
-    const { valid, errors } = validateSchema(handler.schema, msg);
-    if (!valid) {
-      ctx.send({ type: 'error', error: 'Validation failed', details: errors });
+    case 'list':
+      safeSend(ws, { type: 'list', channels: [...providers.keys()] });
+      return;
+
+    case 'subscribe': {
+      const channel: string = msg.channel;
+      if (typeof channel !== 'string' || !channel) {
+        safeSend(ws, { type: 'error', error: 'subscribe: "channel" field is required' });
+        return;
+      }
+      const provider = providers.get(channel);
+      if (!provider) {
+        safeSend(ws, { type: 'error', error: `Unknown channel: "${channel}"`, details: { available: [...providers.keys()] } });
+        return;
+      }
+      const state = clientStates.get(ws)!;
+      if (state.subscriptions.has(channel)) return; // idempotent
+      state.subscriptions.add(channel);
+
+      // Send initial snapshot
+      try {
+        const snap = provider.readSnapshot(sessionName!);
+        safeSend(ws, {
+          type: 'snapshot',
+          channel,
+          data: snap,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        safeSend(ws, { type: 'error', error: `readSnapshot failed for "${channel}": ${err?.message || String(err)}` });
+      }
+
+      // Start subscription
+      const unsub = provider.subscribe(sessionName!, (snap: unknown) => {
+        safeSend(ws, {
+          type: 'event',
+          channel,
+          data: snap,
+          timestamp: new Date().toISOString(),
+        });
+      });
+      state.unsubscribeFns.set(channel, unsub);
       return;
     }
-  }
 
-  // Execute handler
-  try {
-    const result = await handler.fn(msg, ctx);
-    if (result !== undefined) {
-      ctx.send(result);
+    case 'unsubscribe': {
+      const channel: string = msg.channel;
+      if (typeof channel !== 'string' || !channel) {
+        safeSend(ws, { type: 'error', error: 'unsubscribe: "channel" field is required' });
+        return;
+      }
+      const state = clientStates.get(ws)!;
+      const unsub = state.unsubscribeFns.get(channel);
+      if (unsub) {
+        try { unsub(); } catch {}
+      }
+      state.unsubscribeFns.delete(channel);
+      state.subscriptions.delete(channel);
+      return;
     }
-  } catch (err: any) {
-    ctx.send({ type: 'error', error: `Handler error: ${err.message}` });
+
+    default:
+      safeSend(ws, { type: 'error', error: `Unknown message type: "${msgType}"` });
   }
 }
 
-// --- Handler context builder ---
-
-function buildContext(ws: WebSocket, wss: WebSocketServer, session: string, source: any, protocol: LoadedProtocol) {
-  return {
-    session,
-    source,
-    protocol,
-    send: (data: any) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(typeof data === 'string' ? data : JSON.stringify(data));
-      }
-    },
-    broadcast: (data: any) => {
-      const msg = typeof data === 'string' ? data : JSON.stringify(data);
-      for (const client of wss.clients) {
-        if (client.readyState === WebSocket.OPEN) {
-          try { client.send(msg); } catch {}
-        }
-      }
-    },
-  };
+function safeSend(ws: WebSocket, data: unknown): void {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(typeof data === 'string' ? data : JSON.stringify(data));
+  } catch {}
 }
-
-// --- Start ---
 
 main().catch(err => {
-  process.stderr.write(`[pw-ws-server] fatal: ${err.message}\n`);
+  process.stderr.write(`[pw-ws-server] fatal: ${err?.message || String(err)}\n`);
   process.exit(1);
 });

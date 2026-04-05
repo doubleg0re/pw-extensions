@@ -1,4 +1,6 @@
-// ws-server-start — Start WebSocket server for session
+// ws-server-start — Start provider-hosting WebSocket server for session
+// pw-ws-server is transport only. Domain protocols are discovered from
+// active rary extensions' extension.provides.protocols declarations.
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
@@ -11,7 +13,6 @@ export default async function (page, args, runtime) {
     const metadataPath = join(dir, 'ws-server.json');
     const port = args?.port || args?.[0] || 47831;
     const host = args?.host || '127.0.0.1';
-    const protocol = args?.protocol || 'monitor';
     const replace = args?.replace || false;
     // Check existing server
     if (existsSync(metadataPath)) {
@@ -32,7 +33,7 @@ export default async function (page, args, runtime) {
     }
     // Spawn server
     const serverScript = join(import.meta.dirname || __dirname, '..', 'server.ts');
-    const child = spawn(process.execPath, [...process.execArgv, serverScript, sessionName, `--port=${port}`, `--host=${host}`, `--protocol=${protocol}`], { detached: true, stdio: 'ignore', cwd: process.cwd() });
+    const child = spawn(process.execPath, [...process.execArgv, serverScript, sessionName, `--port=${port}`, `--host=${host}`], { detached: true, stdio: 'ignore', cwd: process.cwd() });
     child.unref();
     // Wait and verify server actually started
     const maxWait = 3000;
@@ -50,7 +51,7 @@ export default async function (page, args, runtime) {
                             started: true,
                             pid: meta.pid,
                             url: `ws://${meta.host}:${meta.port}`,
-                            protocol: meta.protocol,
+                            channels: meta.channels || [],
                             session: sessionName,
                         },
                     };
@@ -59,5 +60,5 @@ export default async function (page, args, runtime) {
             catch { }
         }
     }
-    return { result: { error: 'WS server failed to start (metadata not written within 3s). Check protocol and port.' } };
+    return { result: { error: 'WS server failed to start (metadata not written within 3s).' } };
 }

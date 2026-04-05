@@ -1,4 +1,6 @@
-// ws-server-start — Start WebSocket server for session
+// ws-server-start — Start provider-hosting WebSocket server for session
+// pw-ws-server is transport only. Domain protocols are discovered from
+// active rary extensions' extension.provides.protocols declarations.
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
@@ -12,7 +14,6 @@ export default async function(page: any, args: any, runtime?: any): Promise<{ re
   const metadataPath = join(dir, 'ws-server.json');
   const port = args?.port || args?.[0] || 47831;
   const host = args?.host || '127.0.0.1';
-  const protocol = args?.protocol || 'monitor';
   const replace = args?.replace || false;
 
   // Check existing server
@@ -33,7 +34,7 @@ export default async function(page: any, args: any, runtime?: any): Promise<{ re
   const serverScript = join(import.meta.dirname || __dirname, '..', 'server.ts');
   const child = spawn(
     process.execPath,
-    [...process.execArgv, serverScript, sessionName, `--port=${port}`, `--host=${host}`, `--protocol=${protocol}`],
+    [...process.execArgv, serverScript, sessionName, `--port=${port}`, `--host=${host}`],
     { detached: true, stdio: 'ignore', cwd: process.cwd() },
   );
   child.unref();
@@ -54,7 +55,7 @@ export default async function(page: any, args: any, runtime?: any): Promise<{ re
               started: true,
               pid: meta.pid,
               url: `ws://${meta.host}:${meta.port}`,
-              protocol: meta.protocol,
+              channels: meta.channels || [],
               session: sessionName,
             },
           };
@@ -63,5 +64,5 @@ export default async function(page: any, args: any, runtime?: any): Promise<{ re
     }
   }
 
-  return { result: { error: 'WS server failed to start (metadata not written within 3s). Check protocol and port.' } };
+  return { result: { error: 'WS server failed to start (metadata not written within 3s).' } };
 }
