@@ -7,7 +7,14 @@ import { homedir } from 'os';
 import { existsSync, readFileSync } from 'fs';
 import { extractCdpPort, fetchTargets } from './cdp-targets.js';
 import { loadStore } from './tab-store.js';
-import { syncTabs } from './tab-sync.js';
+import { syncTabs, BROWSER_EVENTS } from './tab-sync.js';
+
+interface BrowserStateCache {
+  visible: boolean;
+  focused: boolean;
+}
+
+const browserStateCache = new Map<string, BrowserStateCache>();
 
 function getSessionDir(sessionName: string): string {
   return join(homedir(), '.playwright-state', 'sessions', sessionName);
@@ -55,8 +62,39 @@ export default async (ctx: any) => {
     ctx.emitEvent(evt.event, evt.payload);
   }
 
-  store.save(registryPath);
-  ctx.registerCleanup(() => store.save(registryPath));
+  // Emit browser:focused/blurred/visible/hidden events based on sidecar state
+  try {
+    if (existsSync(registryPath)) {
+      const raw = JSON.parse(readFileSync(registryPath, 'utf-8'));
+      const currentVisible = raw.browserVisible !== false;
+      const currentFocused = raw.browserFocused !== false;
+      const prev = browserStateCache.get(ctx.session.name);
+      const now = new Date().toISOString();
+
+      if (prev) {
+        if (prev.visible !== currentVisible) {
+          ctx.emitEvent(
+            currentVisible ? BROWSER_EVENTS.VISIBLE : BROWSER_EVENTS.HIDDEN,
+            { event: currentVisible ? BROWSER_EVENTS.VISIBLE : BROWSER_EVENTS.HIDDEN, session: ctx.session.name, timestamp: now }
+          );
+        }
+        if (prev.focused !== currentFocused) {
+          ctx.emitEvent(
+            currentFocused ? BROWSER_EVENTS.FOCUSED : BROWSER_EVENTS.BLURRED,
+            { event: currentFocused ? BROWSER_EVENTS.FOCUSED : BROWSER_EVENTS.BLURRED, session: ctx.session.name, timestamp: now }
+          );
+        }
+      }
+      browserStateCache.set(ctx.session.name, { visible: currentVisible, focused: currentFocused });
+    }
+  } catch {}
+
+  // Only save if sidecar is not running — sidecar owns the file and has
+  // fields (browserVisible, browserFocused) that tab-store doesn't know about.
+  if (!sidecarAlive) {
+    store.save(registryPath);
+    ctx.registerCleanup(() => store.save(registryPath));
+  }
 
   ctx.logger.info(`${sidecarAlive ? 'sidecar active, ' : ''}synced ${store.count()} tabs (${events.length} changes)`);
 };

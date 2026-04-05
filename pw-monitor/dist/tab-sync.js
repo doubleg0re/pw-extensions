@@ -8,6 +8,12 @@ export const TAB_EVENTS = {
     ACTIVATED: 'tab:activated',
     DEACTIVATED: 'tab:deactivated',
 };
+export const BROWSER_EVENTS = {
+    FOCUSED: 'browser:focused',
+    BLURRED: 'browser:blurred',
+    VISIBLE: 'browser:visible',
+    HIDDEN: 'browser:hidden',
+};
 /**
  * Sync the tab store against live CDP targets.
  *

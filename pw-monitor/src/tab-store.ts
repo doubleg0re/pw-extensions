@@ -16,6 +16,8 @@ interface StoreData {
   nextId: number;
   tabs: TabEntry[];
   activeTabId?: number | null;
+  browserVisible?: boolean;
+  browserFocused?: boolean;
 }
 
 export interface TabStore {

@@ -13,7 +13,15 @@ export const TAB_EVENTS = {
   DEACTIVATED: 'tab:deactivated',
 } as const;
 
+export const BROWSER_EVENTS = {
+  FOCUSED: 'browser:focused',
+  BLURRED: 'browser:blurred',
+  VISIBLE: 'browser:visible',
+  HIDDEN: 'browser:hidden',
+} as const;
+
 export type TabEventName = (typeof TAB_EVENTS)[keyof typeof TAB_EVENTS];
+export type BrowserEventName = (typeof BROWSER_EVENTS)[keyof typeof BROWSER_EVENTS];
 
 export interface TabEvent {
   event: TabEventName;
@@ -26,6 +34,17 @@ export interface TabEventPayload {
   tabId: number;
   url: string;
   title?: string;
+  timestamp: string;
+}
+
+export interface BrowserEvent {
+  event: BrowserEventName;
+  payload: BrowserEventPayload;
+}
+
+export interface BrowserEventPayload {
+  event: BrowserEventName;
+  session: string;
   timestamp: string;
 }
 

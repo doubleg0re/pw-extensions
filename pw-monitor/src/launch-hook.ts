@@ -4,7 +4,7 @@
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, openSync } from 'fs';
 
 function getSessionDir(sessionName: string): string {
   return join(homedir(), '.playwright-state', 'sessions', sessionName);
@@ -45,12 +45,15 @@ export default async (ctx: any) => {
   const sidecarScript = existsSync(join(scriptDir, 'monitor-sidecar.js'))
     ? join(scriptDir, 'monitor-sidecar.js')
     : join(scriptDir, 'monitor-sidecar.ts');
+  // Open log file for sidecar stderr
+  const logPath = join(sessionDir, 'sidecar.log');
+  const logFd = openSync(logPath, 'a');
   const child = spawn(
     process.execPath,
     [...process.execArgv, sidecarScript, cdpEndpoint, sessionName, registryPath],
     {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', logFd],
       cwd: process.cwd(),
     },
   );

@@ -8,7 +8,10 @@
     "build": "tsc"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "active-win": "^8.2.1"
   }
 }
