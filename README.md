@@ -6,9 +6,11 @@ Official extensions for [pw-skill](https://github.com/doubleg0re/pw-skill).
 
 | Extension | Description |
 |---|---|
-| `pw-monitor` | Real-time tab/focus monitor — CDP sidecar, OS-level foreground tracking, `tab:*` + `browser:*` events, GUI dashboard |
-| `pw-ws-server` | Generic protocol-driven WebSocket server framework — pushes monitor state to clients via `fs.watch` |
-| `pw-user-action` | Cross-platform topmost user-action dialog — Tauri/wry renderer, subscribes to monitor state via WebSocket |
+| [`pw-monitor`](./pw-monitor/README.md) | Real-time tab/focus monitor — CDP sidecar, OS-level foreground tracking, `tab:*` + `browser:*` events, GUI dashboard |
+| [`pw-ws-server`](./pw-ws-server/README.md) | Generic protocol-driven WebSocket server framework — pushes monitor state to clients via `fs.watch` |
+| [`pw-user-action`](./pw-user-action/README.md) | Cross-platform topmost user-action dialog — Tauri/wry renderer, subscribes to monitor state via WebSocket |
+
+See each extension's own README for detailed usage, arguments, and internals.
 
 ## Install
 
