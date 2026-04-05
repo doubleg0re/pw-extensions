@@ -29,7 +29,12 @@ async function loadSourceAdapter(name) {
     if (sourceAdapters[name])
         return sourceAdapters[name];
     const mod = await import(`./sources/${name}.js`);
-    const adapter = mod[`${name.replace(/-/g, '')}Adapter`] || mod.default || mod;
+    // Try multiple naming conventions for the export
+    const camelName = name.replace(/-(\w)/g, (_, c) => c.toUpperCase()); // pw-monitor → pwMonitor
+    const adapter = mod[`${camelName}Adapter`] || // pwMonitorAdapter (preferred)
+        mod[`${name.replace(/-/g, '')}Adapter`] || // pwmonitorAdapter (legacy)
+        mod.default ||
+        mod;
     sourceAdapters[name] = adapter;
     return adapter;
 }

@@ -68,7 +68,7 @@ export const pwMonitorAdapter: SourceAdapter = {
           prevJson = json;
           emit(snapshot);
         }
-      }, 100);
+      }, 30);
     });
 
     return () => { watcher.close(); };

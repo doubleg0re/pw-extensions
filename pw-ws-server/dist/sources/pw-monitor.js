@@ -66,7 +66,7 @@ export const pwMonitorAdapter = {
                     prevJson = json;
                     emit(snapshot);
                 }
-            }, 100);
+            }, 30);
         });
         return () => { watcher.close(); };
     },
