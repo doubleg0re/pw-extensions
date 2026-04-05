@@ -3,6 +3,19 @@
   "version": "0.2.0",
   "description": "Real-time tab monitor — CDP WebSocket sidecar, tab:* events, GUI dashboard",
   "type": "extension",
+  "extension": {
+    "dependencies": {
+      "pw-ws-server": "builtin:pw-ws-server"
+    },
+    "provides": {
+      "protocols": {
+        "pw-monitor/v1": {
+          "transport": "ws",
+          "entry": "dist/provider.js"
+        }
+      }
+    }
+  },
   "hooks": {
     "launch": {
       "entry": "dist/launch-hook.js"
