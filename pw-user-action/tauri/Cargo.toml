@@ -17,5 +17,5 @@ panic = "abort"
 strip = true
 
 [[bin]]
-name = "pw-user-action"
+name = "pw-user-action-renderer"
 path = "src/main.rs"
