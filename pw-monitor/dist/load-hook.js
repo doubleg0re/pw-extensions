@@ -29,7 +29,9 @@ function isSidecarAlive(registryPath) {
 export default async (ctx) => {
     const port = extractCdpPort(ctx.session?.cdpEndpoint);
     if (!port) {
-        ctx.logger.warn('no CDP endpoint available, skipping tab sync');
+        // A session without CDP is a supported setup, not a fault — this ran on every command.
+        // debug() lands on hosts from pw-skill 1.2.0; older ones simply stay quiet.
+        ctx.logger.debug?.('no CDP endpoint available, skipping tab sync');
         return;
     }
     const sessionDir = getSessionDir(ctx.session.name);
@@ -77,5 +79,10 @@ export default async (ctx) => {
         store.save(registryPath);
         ctx.registerCleanup(() => store.save(registryPath));
     }
-    ctx.logger.info(`${sidecarAlive ? 'sidecar active, ' : ''}synced ${store.count()} tabs (${events.length} changes)`);
+    // Routine per-command status: same reasoning as the no-CDP case above.
+    const synced = `${sidecarAlive ? 'sidecar active, ' : ''}synced ${store.count()} tabs (${events.length} changes)`;
+    if (ctx.logger.debug)
+        ctx.logger.debug(synced);
+    else
+        ctx.logger.info(synced);
 };
