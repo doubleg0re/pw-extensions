@@ -539,17 +539,19 @@ async function connect(): Promise<void> {
             newWindowVisible = windowStateMap.get(newActiveWindowId)!.state !== 'minimized';
           }
 
-          // Debug: log every poll
-          const fgB = fgInfo?.type === 'browser' ? fgInfo.bounds : null;
-          const fgType = fgInfo?.type || 'none';
-          const activeWinInfo = newActiveWindowId != null ? windowStateMap.get(newActiveWindowId) : null;
-          process.stderr.write(`[monitor-sidecar] poll: vis=${newWindowVisible} fc=${newFocused} tab=${newActiveTabId} win=${newActiveWindowId} fgType=${fgType} fg=${JSON.stringify(fgB)} activeWin=${JSON.stringify(activeWinInfo)} windows=${windowStateMap.size}\n`);
-
           if (
             newWindowVisible !== browserVisible ||
             newFocused !== browserFocused ||
             newActiveTabId !== activeTabId
           ) {
+            // Log the transition, not the poll. The poll runs continuously and an
+            // idle browser repeats the same line forever: 1,057,577 lines / 234 MB
+            // in one session, which is the whole of sidecar.log.
+            const fgB = fgInfo?.type === 'browser' ? fgInfo.bounds : null;
+            const fgType = fgInfo?.type || 'none';
+            const activeWinInfo = newActiveWindowId != null ? windowStateMap.get(newActiveWindowId) : null;
+            process.stderr.write(`[monitor-sidecar] state: vis=${newWindowVisible} fc=${newFocused} tab=${newActiveTabId} win=${newActiveWindowId} fgType=${fgType} fg=${JSON.stringify(fgB)} activeWin=${JSON.stringify(activeWinInfo)} windows=${windowStateMap.size}\n`);
+
             browserVisible = newWindowVisible;
             browserFocused = newFocused;
             activeTabId = newActiveTabId;
